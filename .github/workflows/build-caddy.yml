@@ -103,11 +103,17 @@ jobs:
 
             chmod 0755 "$OUTPUT"
 
-            "$OUTPUT" version
-            "$OUTPUT" list-modules > "dist/modules-$ARCH.txt"
+            # 不直接执行交叉编译产物。
+            # 使用 go version -m 静态读取二进制中的模块信息。
+            if [ ! -s "$OUTPUT" ]; then
+              echo "ERROR: binary missing or empty: $OUTPUT"
+              exit 1
+            fi
 
-            grep -Fqx "dns.providers.cloudflare" "dist/modules-$ARCH.txt"
-            grep -Fqx "layer4" "dist/modules-$ARCH.txt"
+            MODULE_INFO="$(go version -m "$OUTPUT")"
+
+            echo "Build metadata for linux/$ARCH:"
+            echo "$MODULE_INFO"
 
             ACTUAL_CADDY="$(get_module_version "$OUTPUT" "github.com/caddyserver/caddy/v2")"
             ACTUAL_CF="$(get_module_version "$OUTPUT" "github.com/caddy-dns/cloudflare")"
@@ -120,11 +126,37 @@ jobs:
             echo "caddy-l4 expected: $L4_VERSION"
             echo "caddy-l4 actual:   $ACTUAL_L4"
 
-            [[ "$ACTUAL_CADDY" == "$CADDY_VERSION" ]]
-            [[ "$ACTUAL_CF" == "$CLOUDFLARE_VERSION" ]]
-            [[ "$ACTUAL_L4" == "$L4_VERSION" ]]
+            [[ -n "$ACTUAL_CADDY" ]] || {
+              echo "ERROR: Caddy core module missing"
+              exit 1
+            }
 
-            echo "linux/$ARCH build verification passed"
+            [[ -n "$ACTUAL_CF" ]] || {
+              echo "ERROR: Cloudflare module missing"
+              exit 1
+            }
+
+            [[ -n "$ACTUAL_L4" ]] || {
+              echo "ERROR: caddy-l4 module missing"
+              exit 1
+            }
+
+            [[ "$ACTUAL_CADDY" == "$CADDY_VERSION" ]] || {
+              echo "ERROR: Caddy version mismatch"
+              exit 1
+            }
+
+            [[ "$ACTUAL_CF" == "$CLOUDFLARE_VERSION" ]] || {
+              echo "ERROR: Cloudflare version mismatch"
+              exit 1
+            }
+
+            [[ "$ACTUAL_L4" == "$L4_VERSION" ]] || {
+              echo "ERROR: caddy-l4 version mismatch"
+              exit 1
+            }
+
+            echo "linux/$ARCH static build verification passed"
           done
 
           jq -n \
