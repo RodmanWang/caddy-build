@@ -210,3 +210,9 @@ jobs:
             --latest
 
           echo "Release published: $TAG"
+          
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          retain_days: 7
+          keep_minimum_runs: 7
