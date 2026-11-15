@@ -220,7 +220,44 @@ jobs:
             --latest
 
           echo "Release published: $TAG"
-          
+
+      - name: Delete old Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          CUTOFF="$(date -u -d '7 days ago' +%s)"
+
+          echo "Cleaning Releases older than 7 days..."
+          echo "Cutoff: $(date -u -d "@$CUTOFF" '+%Y-%m-%d %H:%M:%S UTC')"
+
+          while IFS=$'\t' read -r TAG PUBLISHED_AT; do
+            [[ -n "$TAG" && -n "$PUBLISHED_AT" ]] || continue
+
+            PUBLISHED_TS="$(date -u -d "$PUBLISHED_AT" +%s)"
+
+            if (( PUBLISHED_TS < CUTOFF )); then
+              echo "Deleting old Release: $TAG ($PUBLISHED_AT)"
+
+              gh release delete "$TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --yes \
+                --cleanup-tag
+            else
+              echo "Keeping Release: $TAG ($PUBLISHED_AT)"
+            fi
+          done < <(
+            gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --limit 1000 \
+              --json tagName,publishedAt \
+              --jq '.[] | [.tagName, .publishedAt] | @tsv'
+          )
+
+          echo "Release cleanup completed."
+
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
