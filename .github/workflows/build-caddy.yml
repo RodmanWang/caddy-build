@@ -4,7 +4,7 @@ name: Build and Release Caddy
 on:
   workflow_dispatch:
   schedule:
-    - cron: "15 2 * * *"
+    - cron: "15 18 * * *"
 
 permissions:
   contents: write
@@ -23,7 +23,13 @@ jobs:
         with:
           go-version: stable
           cache: false
-
+          
+      - name: Show Beijing Time
+        shell: bash
+        run: |
+          echo "Current Beijing time:"
+          TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S'
+          
       - name: Install build tools
         shell: bash
         run: |
@@ -193,7 +199,7 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          TAG="caddy-build-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}"
+          TAG="caddy-build-$(TZ='Asia/Shanghai' date +%Y%m%d)-${GITHUB_RUN_NUMBER}"
 
           gh release create "$TAG" \
             dist/caddy-linux-amd64 \
