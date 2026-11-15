@@ -1,0 +1,180 @@
+
+name: Build and Release Caddy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: caddy-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+          go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve latest versions
+        id: versions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          get_latest() {
+            curl -fsSL --retry 3 \
+              "https://proxy.golang.org/$1/@latest" |
+              jq -er '.Version'
+          }
+
+          CADDY_VERSION="$(get_latest github.com/caddyserver/caddy/v2)"
+          CLOUDFLARE_VERSION="$(get_latest github.com/caddy-dns/cloudflare)"
+          L4_VERSION="$(get_latest github.com/mholt/caddy-l4)"
+
+          [[ "$CADDY_VERSION" =~ ^v[0-9] ]]
+          [[ "$CLOUDFLARE_VERSION" =~ ^v[0-9] ]]
+          [[ "$L4_VERSION" =~ ^v[0-9] ]]
+
+          echo "caddy=$CADDY_VERSION" >> "$GITHUB_OUTPUT"
+          echo "cloudflare=$CLOUDFLARE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "l4=$L4_VERSION" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Build versions"
+            echo "- Caddy: $CADDY_VERSION"
+            echo "- Cloudflare: $CLOUDFLARE_VERSION"
+            echo "- caddy-l4: $L4_VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build and verify binaries
+        env:
+          CADDY_VERSION: ${{ steps.versions.outputs.caddy }}
+          CLOUDFLARE_VERSION: ${{ steps.versions.outputs.cloudflare }}
+          L4_VERSION: ${{ steps.versions.outputs.l4 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p dist
+
+          get_module_version() {
+            local binary="$1"
+            local module="$2"
+
+            go version -m "$binary" |
+              awk -v module="$module" '
+                ($1 == "mod" || $1 == "dep") && $2 == module {
+                  print $3
+                  exit
+                }
+              '
+          }
+
+          for ARCH in amd64 arm64; do
+            echo "=========================================="
+            echo "Building linux/$ARCH"
+            echo "=========================================="
+
+            OUTPUT="dist/caddy-linux-$ARCH"
+
+            GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 \
+              xcaddy build "$CADDY_VERSION" \
+                --with "github.com/caddy-dns/cloudflare@$CLOUDFLARE_VERSION" \
+                --with "github.com/mholt/caddy-l4@$L4_VERSION" \
+                --output "$OUTPUT"
+
+            chmod 0755 "$OUTPUT"
+
+            "$OUTPUT" version
+            "$OUTPUT" list-modules > "dist/modules-$ARCH.txt"
+
+            grep -Fqx "dns.providers.cloudflare" "dist/modules-$ARCH.txt"
+            grep -Fqx "layer4" "dist/modules-$ARCH.txt"
+
+            ACTUAL_CADDY="$(get_module_version "$OUTPUT" "github.com/caddyserver/caddy/v2")"
+            ACTUAL_CF="$(get_module_version "$OUTPUT" "github.com/caddy-dns/cloudflare")"
+            ACTUAL_L4="$(get_module_version "$OUTPUT" "github.com/mholt/caddy-l4")"
+
+            echo "Caddy expected: $CADDY_VERSION"
+            echo "Caddy actual:   $ACTUAL_CADDY"
+            echo "Cloudflare expected: $CLOUDFLARE_VERSION"
+            echo "Cloudflare actual:   $ACTUAL_CF"
+            echo "caddy-l4 expected: $L4_VERSION"
+            echo "caddy-l4 actual:   $ACTUAL_L4"
+
+            [[ "$ACTUAL_CADDY" == "$CADDY_VERSION" ]]
+            [[ "$ACTUAL_CF" == "$CLOUDFLARE_VERSION" ]]
+            [[ "$ACTUAL_L4" == "$L4_VERSION" ]]
+
+            echo "linux/$ARCH build verification passed"
+          done
+
+          jq -n \
+            --arg caddy "$CADDY_VERSION" \
+            --arg cloudflare "$CLOUDFLARE_VERSION" \
+            --arg l4 "$L4_VERSION" \
+            '{
+              caddy: $caddy,
+              cloudflare: $cloudflare,
+              l4: $l4
+            }' > dist/build-info.json
+
+          cd dist
+
+          sha256sum \
+            caddy-linux-amd64 \
+            caddy-linux-arm64 \
+            build-info.json \
+            > checksums.txt
+
+          echo "Build files:"
+          ls -lh
+
+          echo "SHA256:"
+          cat checksums.txt
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CADDY_VERSION: ${{ steps.versions.outputs.caddy }}
+          CLOUDFLARE_VERSION: ${{ steps.versions.outputs.cloudflare }}
+          L4_VERSION: ${{ steps.versions.outputs.l4 }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          TAG="caddy-build-$(date -u +%Y%m%d)-${GITHUB_RUN_NUMBER}"
+
+          gh release create "$TAG" \
+            dist/caddy-linux-amd64 \
+            dist/caddy-linux-arm64 \
+            dist/build-info.json \
+            dist/checksums.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Caddy $CADDY_VERSION" \
+            --notes "Caddy: $CADDY_VERSION
+          Cloudflare: $CLOUDFLARE_VERSION
+          caddy-l4: $L4_VERSION
+
+          Built and verified by GitHub Actions." \
+            --latest
+
+          echo "Release published: $TAG"
