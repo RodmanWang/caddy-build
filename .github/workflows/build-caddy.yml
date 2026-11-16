@@ -99,6 +99,7 @@ jobs:
       # ------------------------------------------
       # 5. 检查是否有更新
       # ------------------------------------------
+      
       - name: Check for updates
         id: check
         env:
@@ -126,7 +127,6 @@ jobs:
 
           NEEDS_BUILD=false
 
-          # 第一次构建，没有历史 Release
           if [[ -z "$LATEST_TAG" ]]; then
             echo "No previous release found."
             NEEDS_BUILD=true
@@ -136,7 +136,6 @@ jobs:
 
             mkdir -p "$RUNNER_TEMP/latest-release"
 
-            # 下载历史构建记录
             gh release download "$LATEST_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --pattern build-info.json \
@@ -144,17 +143,18 @@ jobs:
 
             OLD_INFO="$RUNNER_TEMP/latest-release/build-info.json"
 
-            OLD_CADDY="$(jq -er '.caddy' "$OLD_INFO")"
-            OLD_CF="$(jq -er '.cloudflare' "$OLD_INFO")"
-            OLD_L4="$(jq -er '.l4' "$OLD_INFO")"
-            OLD_COMMIT="$(jq -er '.source_commit' "$OLD_INFO")"
+            # 兼容旧版 build-info.json
+            OLD_CADDY="$(jq -r '.caddy // empty' "$OLD_INFO")"
+            OLD_CF="$(jq -r '.cloudflare // empty' "$OLD_INFO")"
+            OLD_L4="$(jq -r '.l4 // empty' "$OLD_INFO")"
+            OLD_COMMIT="$(jq -r '.source_commit // empty' "$OLD_INFO")"
 
             echo "=========================================="
             echo "Previous versions:"
             echo "Caddy:      $OLD_CADDY"
             echo "Cloudflare: $OLD_CF"
             echo "caddy-l4:   $OLD_L4"
-            echo "Source:     $OLD_COMMIT"
+            echo "Source:     ${OLD_COMMIT:-Not recorded}"
             echo "=========================================="
 
             echo "Current versions:"
@@ -179,8 +179,9 @@ jobs:
               NEEDS_BUILD=true
             fi
 
-            if [[ "$OLD_COMMIT" != "$SOURCE_COMMIT" ]]; then
-              echo "Repository source updated."
+            # 旧版没有 source_commit，首次升级时自动重新构建
+            if [[ -z "$OLD_COMMIT" || "$OLD_COMMIT" != "$SOURCE_COMMIT" ]]; then
+              echo "Repository source updated or not previously recorded."
               NEEDS_BUILD=true
             fi
           fi
