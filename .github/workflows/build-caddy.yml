@@ -3,11 +3,22 @@ name: Build and Release Caddy
 
 on:
   workflow_dispatch:
+
   schedule:
+    # 每天北京时间 02:15
     - cron: "15 18 * * *"
+
+  push:
+    paths:
+      - ".github/workflows/**"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "**/*.sh"
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: caddy-release
@@ -18,27 +29,42 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      # ------------------------------------------
+      # 1. 初始化 Go 环境
+      # ------------------------------------------
       - name: Install Go
         uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: false
-          
+
+      # ------------------------------------------
+      # 2. 显示北京时间
+      # ------------------------------------------
       - name: Show Beijing Time
         shell: bash
         run: |
           echo "Current Beijing time:"
           TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S'
-          
+
+      # ------------------------------------------
+      # 3. 安装构建工具
+      # ------------------------------------------
       - name: Install build tools
         shell: bash
         run: |
           set -Eeuo pipefail
+
           sudo apt-get update
           sudo apt-get install -y jq
+
           go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
+      # ------------------------------------------
+      # 4. 检测最新版本
+      # ------------------------------------------
       - name: Resolve latest versions
         id: versions
         shell: bash
@@ -64,13 +90,124 @@ jobs:
           echo "l4=$L4_VERSION" >> "$GITHUB_OUTPUT"
 
           {
-            echo "### Build versions"
+            echo "### Latest versions"
             echo "- Caddy: $CADDY_VERSION"
             echo "- Cloudflare: $CLOUDFLARE_VERSION"
             echo "- caddy-l4: $L4_VERSION"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ------------------------------------------
+      # 5. 检查是否有更新
+      # ------------------------------------------
+      - name: Check for updates
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CADDY_VERSION: ${{ steps.versions.outputs.caddy }}
+          CLOUDFLARE_VERSION: ${{ steps.versions.outputs.cloudflare }}
+          L4_VERSION: ${{ steps.versions.outputs.l4 }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "Checking previous Caddy release..."
+
+          LATEST_TAG="$(
+            gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --limit 1000 \
+              --json tagName,publishedAt \
+              --jq '[
+                .[] |
+                select(.tagName | startswith("caddy-build-"))
+              ] | sort_by(.publishedAt) | last | .tagName // empty'
+          )"
+
+          NEEDS_BUILD=false
+
+          # 第一次构建，没有历史 Release
+          if [[ -z "$LATEST_TAG" ]]; then
+            echo "No previous release found."
+            NEEDS_BUILD=true
+
+          else
+            echo "Previous release: $LATEST_TAG"
+
+            mkdir -p "$RUNNER_TEMP/latest-release"
+
+            # 下载历史构建记录
+            gh release download "$LATEST_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern build-info.json \
+              --dir "$RUNNER_TEMP/latest-release"
+
+            OLD_INFO="$RUNNER_TEMP/latest-release/build-info.json"
+
+            OLD_CADDY="$(jq -er '.caddy' "$OLD_INFO")"
+            OLD_CF="$(jq -er '.cloudflare' "$OLD_INFO")"
+            OLD_L4="$(jq -er '.l4' "$OLD_INFO")"
+            OLD_COMMIT="$(jq -er '.source_commit' "$OLD_INFO")"
+
+            echo "=========================================="
+            echo "Previous versions:"
+            echo "Caddy:      $OLD_CADDY"
+            echo "Cloudflare: $OLD_CF"
+            echo "caddy-l4:   $OLD_L4"
+            echo "Source:     $OLD_COMMIT"
+            echo "=========================================="
+
+            echo "Current versions:"
+            echo "Caddy:      $CADDY_VERSION"
+            echo "Cloudflare: $CLOUDFLARE_VERSION"
+            echo "caddy-l4:   $L4_VERSION"
+            echo "Source:     $SOURCE_COMMIT"
+            echo "=========================================="
+
+            if [[ "$OLD_CADDY" != "$CADDY_VERSION" ]]; then
+              echo "Caddy core updated."
+              NEEDS_BUILD=true
+            fi
+
+            if [[ "$OLD_CF" != "$CLOUDFLARE_VERSION" ]]; then
+              echo "Cloudflare plugin updated."
+              NEEDS_BUILD=true
+            fi
+
+            if [[ "$OLD_L4" != "$L4_VERSION" ]]; then
+              echo "caddy-l4 plugin updated."
+              NEEDS_BUILD=true
+            fi
+
+            if [[ "$OLD_COMMIT" != "$SOURCE_COMMIT" ]]; then
+              echo "Repository source updated."
+              NEEDS_BUILD=true
+            fi
+          fi
+
+          echo "=========================================="
+
+          if [[ "$NEEDS_BUILD" == "true" ]]; then
+            echo "Update detected. Starting build."
+
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
+
+            echo "### Update detected" >> "$GITHUB_STEP_SUMMARY"
+            echo "A new build will be performed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No updates detected. Build skipped."
+
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+
+            echo "### No updates detected" >> "$GITHUB_STEP_SUMMARY"
+            echo "Compilation and release skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ------------------------------------------
+      # 6. 编译并验证 AMD64 / ARM64
+      # ------------------------------------------
       - name: Build and verify binaries
+        if: steps.check.outputs.needs_build == 'true'
         env:
           CADDY_VERSION: ${{ steps.versions.outputs.caddy }}
           CLOUDFLARE_VERSION: ${{ steps.versions.outputs.cloudflare }}
@@ -95,6 +232,7 @@ jobs:
           }
 
           for ARCH in amd64 arm64; do
+
             echo "=========================================="
             echo "Building linux/$ARCH"
             echo "=========================================="
@@ -109,10 +247,8 @@ jobs:
 
             chmod 0755 "$OUTPUT"
 
-            # 不直接执行交叉编译产物。
-            # 使用 go version -m 静态读取二进制中的模块信息。
-            if [ ! -s "$OUTPUT" ]; then
-              echo "ERROR: binary missing or empty: $OUTPUT"
+            if [[ ! -s "$OUTPUT" ]]; then
+              echo "ERROR: Binary missing or empty: $OUTPUT"
               exit 1
             fi
 
@@ -121,14 +257,27 @@ jobs:
             echo "Build metadata for linux/$ARCH:"
             echo "$MODULE_INFO"
 
-            ACTUAL_CADDY="$(get_module_version "$OUTPUT" "github.com/caddyserver/caddy/v2")"
-            ACTUAL_CF="$(get_module_version "$OUTPUT" "github.com/caddy-dns/cloudflare")"
-            ACTUAL_L4="$(get_module_version "$OUTPUT" "github.com/mholt/caddy-l4")"
+            ACTUAL_CADDY="$(
+              get_module_version "$OUTPUT" \
+                "github.com/caddyserver/caddy/v2"
+            )"
+
+            ACTUAL_CF="$(
+              get_module_version "$OUTPUT" \
+                "github.com/caddy-dns/cloudflare"
+            )"
+
+            ACTUAL_L4="$(
+              get_module_version "$OUTPUT" \
+                "github.com/mholt/caddy-l4"
+            )"
 
             echo "Caddy expected: $CADDY_VERSION"
             echo "Caddy actual:   $ACTUAL_CADDY"
+
             echo "Cloudflare expected: $CLOUDFLARE_VERSION"
             echo "Cloudflare actual:   $ACTUAL_CF"
+
             echo "caddy-l4 expected: $L4_VERSION"
             echo "caddy-l4 actual:   $ACTUAL_L4"
 
@@ -162,19 +311,28 @@ jobs:
               exit 1
             }
 
-            echo "linux/$ARCH static build verification passed"
+            echo "linux/$ARCH verification passed."
+
           done
 
+          # --------------------------------------
+          # 生成构建信息
+          # --------------------------------------
           jq -n \
             --arg caddy "$CADDY_VERSION" \
             --arg cloudflare "$CLOUDFLARE_VERSION" \
             --arg l4 "$L4_VERSION" \
+            --arg source_commit "$GITHUB_SHA" \
             '{
               caddy: $caddy,
               cloudflare: $cloudflare,
-              l4: $l4
+              l4: $l4,
+              source_commit: $source_commit
             }' > dist/build-info.json
 
+          # --------------------------------------
+          # 生成 SHA256
+          # --------------------------------------
           cd dist
 
           sha256sum \
@@ -189,7 +347,11 @@ jobs:
           echo "SHA256:"
           cat checksums.txt
 
+      # ------------------------------------------
+      # 7. 发布 GitHub Release
+      # ------------------------------------------
       - name: Publish GitHub Release
+        if: steps.check.outputs.needs_build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           CADDY_VERSION: ${{ steps.versions.outputs.caddy }}
@@ -222,11 +384,24 @@ jobs:
              Linux ARM64 / AArch64
              For 64-bit ARM processors, such as AWS Graviton and ARM-based servers.
 
+          Source commit: $GITHUB_SHA
+
           Built and verified by GitHub Actions." \
             --latest
 
           echo "Release published: $TAG"
 
+          {
+            echo "### Release published"
+            echo "- Tag: $TAG"
+            echo "- Caddy: $CADDY_VERSION"
+            echo "- Cloudflare: $CLOUDFLARE_VERSION"
+            echo "- caddy-l4: $L4_VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ------------------------------------------
+      # 8. 清理旧 Release
+      # ------------------------------------------
       - name: Delete old Releases
         env:
           GH_TOKEN: ${{ github.token }}
@@ -236,34 +411,63 @@ jobs:
 
           CUTOFF="$(date -u -d '7 days ago' +%s)"
 
+          # 找到最新的 Caddy Release
+          LATEST_TAG="$(
+            gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --limit 1000 \
+              --json tagName,publishedAt \
+              --jq '[
+                .[] |
+                select(.tagName | startswith("caddy-build-"))
+              ] | sort_by(.publishedAt) | last | .tagName // empty'
+          )"
+
+          echo "Latest Caddy release: $LATEST_TAG"
+
           echo "Cleaning Releases older than 7 days..."
           echo "Cutoff: $(date -u -d "@$CUTOFF" '+%Y-%m-%d %H:%M:%S UTC')"
 
           while IFS=$'\t' read -r TAG PUBLISHED_AT; do
+
             [[ -n "$TAG" && -n "$PUBLISHED_AT" ]] || continue
+
+            # 永远保留最新版本
+            if [[ "$TAG" == "$LATEST_TAG" ]]; then
+              echo "Keeping latest Release: $TAG"
+              continue
+            fi
 
             PUBLISHED_TS="$(date -u -d "$PUBLISHED_AT" +%s)"
 
             if (( PUBLISHED_TS < CUTOFF )); then
+
               echo "Deleting old Release: $TAG ($PUBLISHED_AT)"
 
               gh release delete "$TAG" \
                 --repo "$GITHUB_REPOSITORY" \
                 --yes \
                 --cleanup-tag
+
             else
               echo "Keeping Release: $TAG ($PUBLISHED_AT)"
             fi
+
           done < <(
             gh release list \
               --repo "$GITHUB_REPOSITORY" \
               --limit 1000 \
               --json tagName,publishedAt \
-              --jq '.[] | [.tagName, .publishedAt] | @tsv'
+              --jq '.[] |
+                select(.tagName | startswith("caddy-build-")) |
+                [.tagName, .publishedAt] | @tsv'
           )
 
           echo "Release cleanup completed."
 
+      # ------------------------------------------
+      # 9. 清理旧 GitHub Actions 运行记录
+      # ------------------------------------------
       - name: Delete old workflow runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
