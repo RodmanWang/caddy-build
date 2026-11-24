@@ -1,5 +1,5 @@
 
-name: Build and Release Caddy
+name: 构建并发布 Caddy
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
       # ------------------------------------------
       # 1. 初始化 Go 环境
       # ------------------------------------------
-      - name: Install Go
+      - name: 安装 Go 环境
         uses: actions/setup-go@v6
         with:
           go-version: stable
@@ -41,16 +41,16 @@ jobs:
       # ------------------------------------------
       # 2. 显示北京时间
       # ------------------------------------------
-      - name: Show Beijing Time
+      - name: 显示北京时间
         shell: bash
         run: |
-          echo "Current Beijing time:"
+          echo "当前北京时间："
           TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S'
 
       # ------------------------------------------
       # 3. 安装构建工具
       # ------------------------------------------
-      - name: Install build tools
+      - name: 安装构建工具
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -65,7 +65,7 @@ jobs:
       # ------------------------------------------
       # 4. 检测最新版本
       # ------------------------------------------
-      - name: Resolve latest versions
+      - name: 获取最新依赖版本
         id: versions
         shell: bash
         run: |
@@ -90,10 +90,10 @@ jobs:
           echo "l4=$L4_VERSION" >> "$GITHUB_OUTPUT"
 
           {
-            echo "### Latest versions"
-            echo "- Caddy: $CADDY_VERSION"
-            echo "- Cloudflare: $CLOUDFLARE_VERSION"
-            echo "- caddy-l4: $L4_VERSION"
+            echo "### 最新版本信息"
+            echo "- Caddy 核心：$CADDY_VERSION"
+            echo "- Cloudflare 插件：$CLOUDFLARE_VERSION"
+            echo "- caddy-l4 插件：$L4_VERSION"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # ------------------------------------------
@@ -112,7 +112,7 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          echo "Checking previous Caddy release..."
+          echo "正在检查上一次 Caddy 发布记录……"
 
           LATEST_TAG="$(
             gh release list \
@@ -128,11 +128,11 @@ jobs:
           NEEDS_BUILD=false
 
           if [[ -z "$LATEST_TAG" ]]; then
-            echo "No previous release found."
+            echo "未找到历史发布记录。"
             NEEDS_BUILD=true
 
           else
-            echo "Previous release: $LATEST_TAG"
+            echo "上一次发布：$LATEST_TAG"
 
             mkdir -p "$RUNNER_TEMP/latest-release"
 
@@ -150,38 +150,38 @@ jobs:
             OLD_COMMIT="$(jq -r '.source_commit // empty' "$OLD_INFO")"
 
             echo "=========================================="
-            echo "Previous versions:"
-            echo "Caddy:      $OLD_CADDY"
-            echo "Cloudflare: $OLD_CF"
-            echo "caddy-l4:   $OLD_L4"
-            echo "Source:     ${OLD_COMMIT:-Not recorded}"
+            echo "上一次构建使用的版本："
+            echo "Caddy 核心：  $OLD_CADDY"
+            echo "Cloudflare：  $OLD_CF"
+            echo "caddy-l4：    $OLD_L4"
+            echo "源码提交：    ${OLD_COMMIT:-未记录}"
             echo "=========================================="
 
-            echo "Current versions:"
+            echo "本次检测到的版本："
             echo "Caddy:      $CADDY_VERSION"
             echo "Cloudflare: $CLOUDFLARE_VERSION"
             echo "caddy-l4:   $L4_VERSION"
-            echo "Source:     $SOURCE_COMMIT"
+            echo "源码提交：    $SOURCE_COMMIT"
             echo "=========================================="
 
             if [[ "$OLD_CADDY" != "$CADDY_VERSION" ]]; then
-              echo "Caddy core updated."
+              echo "检测到 Caddy 核心版本更新。"
               NEEDS_BUILD=true
             fi
 
             if [[ "$OLD_CF" != "$CLOUDFLARE_VERSION" ]]; then
-              echo "Cloudflare plugin updated."
+              echo "检测到 Cloudflare 插件版本更新。"
               NEEDS_BUILD=true
             fi
 
             if [[ "$OLD_L4" != "$L4_VERSION" ]]; then
-              echo "caddy-l4 plugin updated."
+              echo "检测到 caddy-l4 插件版本更新。"
               NEEDS_BUILD=true
             fi
 
             # 旧版没有 source_commit，首次升级时自动重新构建
             if [[ -z "$OLD_COMMIT" || "$OLD_COMMIT" != "$SOURCE_COMMIT" ]]; then
-              echo "Repository source updated or not previously recorded."
+              echo "仓库源码已更新，或历史记录中没有源码提交信息。"
               NEEDS_BUILD=true
             fi
           fi
@@ -189,25 +189,25 @@ jobs:
           echo "=========================================="
 
           if [[ "$NEEDS_BUILD" == "true" ]]; then
-            echo "Update detected. Starting build."
+            echo "检测到更新，开始构建。"
 
             echo "needs_build=true" >> "$GITHUB_OUTPUT"
 
-            echo "### Update detected" >> "$GITHUB_STEP_SUMMARY"
-            echo "A new build will be performed." >> "$GITHUB_STEP_SUMMARY"
+            echo "### 检测到更新" >> "$GITHUB_STEP_SUMMARY"
+            echo "即将执行新一轮构建。" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "No updates detected. Build skipped."
+            echo "未检测到更新，跳过构建。"
 
             echo "needs_build=false" >> "$GITHUB_OUTPUT"
 
-            echo "### No updates detected" >> "$GITHUB_STEP_SUMMARY"
-            echo "Compilation and release skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "### 未检测到更新" >> "$GITHUB_STEP_SUMMARY"
+            echo "本次跳过编译和发布。" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # ------------------------------------------
       # 6. 编译并验证 AMD64 / ARM64
       # ------------------------------------------
-      - name: Build and verify binaries
+      - name: 构建并验证二进制文件
         if: steps.check.outputs.needs_build == 'true'
         env:
           CADDY_VERSION: ${{ steps.versions.outputs.caddy }}
@@ -235,7 +235,7 @@ jobs:
           for ARCH in amd64 arm64; do
 
             echo "=========================================="
-            echo "Building linux/$ARCH"
+            echo "正在构建 Linux/$ARCH 版本"
             echo "=========================================="
 
             OUTPUT="dist/caddy-linux-$ARCH"
@@ -249,13 +249,13 @@ jobs:
             chmod 0755 "$OUTPUT"
 
             if [[ ! -s "$OUTPUT" ]]; then
-              echo "ERROR: Binary missing or empty: $OUTPUT"
+              echo "错误：二进制文件不存在或为空：$OUTPUT"
               exit 1
             fi
 
             MODULE_INFO="$(go version -m "$OUTPUT")"
 
-            echo "Build metadata for linux/$ARCH:"
+            echo "Linux/$ARCH 构建元数据："
             echo "$MODULE_INFO"
 
             ACTUAL_CADDY="$(
@@ -273,46 +273,46 @@ jobs:
                 "github.com/mholt/caddy-l4"
             )"
 
-            echo "Caddy expected: $CADDY_VERSION"
-            echo "Caddy actual:   $ACTUAL_CADDY"
+            echo "Caddy 核心预期版本：$CADDY_VERSION"
+            echo "Caddy 核心实际版本：$ACTUAL_CADDY"
 
-            echo "Cloudflare expected: $CLOUDFLARE_VERSION"
-            echo "Cloudflare actual:   $ACTUAL_CF"
+            echo "Cloudflare 插件预期版本：$CLOUDFLARE_VERSION"
+            echo "Cloudflare 插件实际版本：$ACTUAL_CF"
 
-            echo "caddy-l4 expected: $L4_VERSION"
-            echo "caddy-l4 actual:   $ACTUAL_L4"
+            echo "caddy-l4 插件预期版本：$L4_VERSION"
+            echo "caddy-l4 插件实际版本：$ACTUAL_L4"
 
             [[ -n "$ACTUAL_CADDY" ]] || {
-              echo "ERROR: Caddy core module missing"
+              echo "错误：未在二进制文件中找到 Caddy 核心模块"
               exit 1
             }
 
             [[ -n "$ACTUAL_CF" ]] || {
-              echo "ERROR: Cloudflare module missing"
+              echo "错误：未在二进制文件中找到 Cloudflare 模块"
               exit 1
             }
 
             [[ -n "$ACTUAL_L4" ]] || {
-              echo "ERROR: caddy-l4 module missing"
+              echo "错误：未在二进制文件中找到 caddy-l4 模块"
               exit 1
             }
 
             [[ "$ACTUAL_CADDY" == "$CADDY_VERSION" ]] || {
-              echo "ERROR: Caddy version mismatch"
+              echo "错误：Caddy 核心版本与预期不一致"
               exit 1
             }
 
             [[ "$ACTUAL_CF" == "$CLOUDFLARE_VERSION" ]] || {
-              echo "ERROR: Cloudflare version mismatch"
+              echo "错误：Cloudflare 插件版本与预期不一致"
               exit 1
             }
 
             [[ "$ACTUAL_L4" == "$L4_VERSION" ]] || {
-              echo "ERROR: caddy-l4 version mismatch"
+              echo "错误：caddy-l4 插件版本与预期不一致"
               exit 1
             }
 
-            echo "linux/$ARCH verification passed."
+            echo "Linux/$ARCH 版本验证通过。"
 
           done
 
@@ -342,16 +342,16 @@ jobs:
             build-info.json \
             > checksums.txt
 
-          echo "Build files:"
+          echo "构建产物："
           ls -lh
 
-          echo "SHA256:"
+          echo "SHA256 校验值："
           cat checksums.txt
 
       # ------------------------------------------
       # 7. 发布 GitHub Release
       # ------------------------------------------
-      - name: Publish GitHub Release
+      - name: 发布 GitHub Release
         if: steps.check.outputs.needs_build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -370,40 +370,40 @@ jobs:
             dist/build-info.json \
             dist/checksums.txt \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Caddy $CADDY_VERSION" \
-            --notes "Caddy: $CADDY_VERSION
-          Cloudflare: $CLOUDFLARE_VERSION
-          caddy-l4: $L4_VERSION
+            --title "Caddy $CADDY_VERSION 发布版" \
+            --notes "Caddy 核心版本：$CADDY_VERSION
+          Cloudflare 插件版本：$CLOUDFLARE_VERSION
+          caddy-l4 插件版本：$L4_VERSION
 
-          Hardware compatibility:
+          硬件架构兼容性：
 
           1. caddy-linux-amd64
              Linux x86_64 / AMD64
-             For Intel and AMD 64-bit processors.
+             适用于 Intel 和 AMD 的 64 位处理器。
 
           2. caddy-linux-arm64
              Linux ARM64 / AArch64
-             For 64-bit ARM processors, such as AWS Graviton and ARM-based servers.
+             适用于 AWS Graviton 等 64 位 ARM 处理器及 ARM 架构服务器。
 
-          Source commit: $GITHUB_SHA
+          源码提交：$GITHUB_SHA
 
-          Built and verified by GitHub Actions." \
+          由 GitHub Actions 自动构建并完成验证。" \
             --latest
 
-          echo "Release published: $TAG"
+          echo "发布完成：$TAG"
 
           {
-            echo "### Release published"
-            echo "- Tag: $TAG"
-            echo "- Caddy: $CADDY_VERSION"
-            echo "- Cloudflare: $CLOUDFLARE_VERSION"
-            echo "- caddy-l4: $L4_VERSION"
+            echo "### 发布成功"
+            echo "- 发布标签：$TAG"
+            echo "- Caddy 核心：$CADDY_VERSION"
+            echo "- Cloudflare 插件：$CLOUDFLARE_VERSION"
+            echo "- caddy-l4 插件：$L4_VERSION"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # ------------------------------------------
       # 8. 清理旧 Release
       # ------------------------------------------
-      - name: Delete old Releases
+      - name: 清理过期 Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -412,7 +412,7 @@ jobs:
 
           CUTOFF="$(date -u -d '7 days ago' +%s)"
 
-          # 找到最新的 Caddy Release
+          # 找到最新的 Caddy 发布版本
           LATEST_TAG="$(
             gh release list \
               --repo "$GITHUB_REPOSITORY" \
@@ -424,10 +424,10 @@ jobs:
               ] | sort_by(.publishedAt) | last | .tagName // empty'
           )"
 
-          echo "Latest Caddy release: $LATEST_TAG"
+          echo "最新的 Caddy 发布版本：$LATEST_TAG"
 
-          echo "Cleaning Releases older than 7 days..."
-          echo "Cutoff: $(date -u -d "@$CUTOFF" '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "正在清理发布超过 7 天的旧版本……"
+          echo "清理时间界限：$(date -u -d "@$CUTOFF" '+%Y-%m-%d %H:%M:%S UTC')"
 
           while IFS=$'\t' read -r TAG PUBLISHED_AT; do
 
@@ -435,7 +435,7 @@ jobs:
 
             # 永远保留最新版本
             if [[ "$TAG" == "$LATEST_TAG" ]]; then
-              echo "Keeping latest Release: $TAG"
+              echo "保留最新发布版本：$TAG"
               continue
             fi
 
@@ -443,7 +443,7 @@ jobs:
 
             if (( PUBLISHED_TS < CUTOFF )); then
 
-              echo "Deleting old Release: $TAG ($PUBLISHED_AT)"
+              echo "正在删除过期发布版本：$TAG（发布时间：$PUBLISHED_AT）"
 
               gh release delete "$TAG" \
                 --repo "$GITHUB_REPOSITORY" \
@@ -451,7 +451,7 @@ jobs:
                 --cleanup-tag
 
             else
-              echo "Keeping Release: $TAG ($PUBLISHED_AT)"
+              echo "保留发布版本：$TAG（发布时间：$PUBLISHED_AT）"
             fi
 
           done < <(
@@ -464,12 +464,12 @@ jobs:
                 [.tagName, .publishedAt] | @tsv'
           )
 
-          echo "Release cleanup completed."
+          echo "旧版 Release 清理完成。"
 
       # ------------------------------------------
       # 9. 清理旧 GitHub Actions 运行记录
       # ------------------------------------------
-      - name: Delete old workflow runs
+      - name: 清理过期的 GitHub Actions 运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:
           retain_days: 7
