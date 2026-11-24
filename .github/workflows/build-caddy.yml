@@ -5,8 +5,8 @@ on:
   workflow_dispatch:
 
   schedule:
-    # 每天北京时间 02:15
-    - cron: "15 18 * * *"
+    # 每天北京时间凌晨 01:15运行
+    - cron: "15 17 * * *"
 
   push:
     paths:
