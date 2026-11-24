@@ -100,7 +100,7 @@ jobs:
       # 5. 检查是否有更新
       # ------------------------------------------
       
-      - name: Check for updates
+      - name: 检查依赖和源码更新
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -158,9 +158,9 @@ jobs:
             echo "=========================================="
 
             echo "本次检测到的版本："
-            echo "Caddy:      $CADDY_VERSION"
-            echo "Cloudflare: $CLOUDFLARE_VERSION"
-            echo "caddy-l4:   $L4_VERSION"
+            echo "Caddy 核心：  $CADDY_VERSION"
+            echo "Cloudflare：  $CLOUDFLARE_VERSION"
+            echo "caddy-l4：    $L4_VERSION"
             echo "源码提交：    $SOURCE_COMMIT"
             echo "=========================================="
 
