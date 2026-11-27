@@ -6,7 +6,8 @@ on:
 
   schedule:
     # 每天北京时间凌晨 01:15运行
-    - cron: "15 17 * * *"
+    - cron: "15 1 * * *"
+    timezone: 'Asia/Shanghai'
 
   push:
     paths:
