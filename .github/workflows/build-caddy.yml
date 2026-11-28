@@ -8,13 +8,6 @@ on:
     - cron: "15 0,12 * * *"
       timezone: "Asia/Shanghai"
       
-  push:
-    paths:
-      - ".github/workflows/**"
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - "**/*.sh"
 
 permissions:
   contents: write
@@ -100,14 +93,13 @@ jobs:
       # 5. 检查是否有更新
       # ------------------------------------------
       
-      - name: 检查依赖和源码更新
+      - name: 检查上游依赖版本更新
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
           CADDY_VERSION: ${{ steps.versions.outputs.caddy }}
           CLOUDFLARE_VERSION: ${{ steps.versions.outputs.cloudflare }}
           L4_VERSION: ${{ steps.versions.outputs.l4 }}
-          SOURCE_COMMIT: ${{ github.sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -147,21 +139,18 @@ jobs:
             OLD_CADDY="$(jq -r '.caddy // empty' "$OLD_INFO")"
             OLD_CF="$(jq -r '.cloudflare // empty' "$OLD_INFO")"
             OLD_L4="$(jq -r '.l4 // empty' "$OLD_INFO")"
-            OLD_COMMIT="$(jq -r '.source_commit // empty' "$OLD_INFO")"
 
             echo "=========================================="
             echo "上一次构建使用的版本："
             echo "Caddy 核心：  $OLD_CADDY"
             echo "Cloudflare：  $OLD_CF"
             echo "caddy-l4：    $OLD_L4"
-            echo "源码提交：    ${OLD_COMMIT:-未记录}"
             echo "=========================================="
 
             echo "本次检测到的版本："
             echo "Caddy 核心：  $CADDY_VERSION"
             echo "Cloudflare：  $CLOUDFLARE_VERSION"
             echo "caddy-l4：    $L4_VERSION"
-            echo "源码提交：    $SOURCE_COMMIT"
             echo "=========================================="
 
             if [[ "$OLD_CADDY" != "$CADDY_VERSION" ]]; then
@@ -179,11 +168,6 @@ jobs:
               NEEDS_BUILD=true
             fi
 
-            # 旧版没有 source_commit，首次升级时自动重新构建
-            if [[ -z "$OLD_COMMIT" || "$OLD_COMMIT" != "$SOURCE_COMMIT" ]]; then
-              echo "仓库源码已更新，或历史记录中没有源码提交信息。"
-              NEEDS_BUILD=true
-            fi
           fi
 
           echo "=========================================="
@@ -323,12 +307,10 @@ jobs:
             --arg caddy "$CADDY_VERSION" \
             --arg cloudflare "$CLOUDFLARE_VERSION" \
             --arg l4 "$L4_VERSION" \
-            --arg source_commit "$GITHUB_SHA" \
             '{
               caddy: $caddy,
               cloudflare: $cloudflare,
-              l4: $l4,
-              source_commit: $source_commit
+              l4: $l4
             }' > dist/build-info.json
 
           # --------------------------------------
@@ -385,7 +367,6 @@ jobs:
              Linux ARM64 / AArch64
              适用于 AWS Graviton 等 64 位 ARM 处理器及 ARM 架构服务器。
 
-          源码提交：$GITHUB_SHA
 
           由 GitHub Actions 自动构建并完成验证。" \
             --latest
